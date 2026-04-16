@@ -1,88 +1,70 @@
 /**
  * Demo 4: 模型切换
  * 
- * 演示：
- * 1. 不同模型的比较
- * 2. 动态切换模型
- * 3. 模型参数配置
+ * SDK 支持在创建会话时指定模型，或在会话中动态切换。
  */
 
-import { Agent } from "@anthropic-ai/claude-agent-sdk";
-
-// 可用模型列表
-const MODELS = {
-  "claude-3-5-sonnet-20241022": "Sonnet 4 (最新)",
-  "claude-3-5-haiku-20241022": "Haiku 3.5 (快速)",
-  "claude-3-opus-20240229": "Opus 3 (最强大)",
-} as const;
-
-async function compareModels(prompt: string) {
-  console.log("=== Demo 4: 模型切换 ===\n");
-  console.log(`查询: "${prompt}"\n`);
-
-  const results: Record<string, { text: string; inputTokens: number; outputTokens: number; time: number }> = {};
-
-  for (const [model, desc] of Object.entries(MODELS)) {
-    console.log(`--- ${desc} (${model}) ---`);
-
-    const agent = new Agent({
-      model,
-      systemPrompt: "简洁回答，只说重点。",
-    });
-
-    const start = Date.now();
-    const response = await agent.run({ message: prompt });
-    const elapsed = Date.now() - start;
-
-    results[model] = {
-      text: response.text,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      time: elapsed,
-    };
-
-    console.log(`回复: ${response.text}`);
-    console.log(`耗时: ${elapsed}ms | 输入: ${response.usage.input_tokens} | 输出: ${response.usage.output_tokens}\n`);
-  }
-
-  // 总结对比
-  console.log("--- 对比总结 ---");
-  for (const [model, result] of Object.entries(results)) {
-    const desc = MODELS[model as keyof typeof MODELS] || model;
-    console.log(`${desc}: ${result.time}ms, ${result.outputTokens} output tokens`);
-  }
-}
-
-async function dynamicModelSwitch() {
-  console.log("\n--- 动态切换模型 ---");
-
-  const agent = new Agent({
-    model: "claude-3-5-haiku-20241022", // 默认用快速的
-    systemPrompt: "你是助手。",
-  });
-
-  // 问一个简单问题（Haiku 够用）
-  const r1 = await agent.run({ message: "1+1等于几？" });
-  console.log("Haiku 回复:", r1.text);
-  console.log("当前模型:", agent.getModel());
-
-  // 切到更强的模型
-  console.log("\n切换到 Sonnet...");
-  agent.setModel("claude-3-5-sonnet-20241022");
-
-  const r2 = await agent.run({ message: "解释一下量子计算的基本原理" });
-  console.log("Sonnet 回复:", r2.text.slice(0, 100) + "...");
-  console.log("当前模型:", agent.getModel());
-
-  // 查看所有可用模型
-  console.log("\n--- 可用模型 ---");
-  const available = agent.getAvailableModels();
-  available.forEach((m: string) => console.log(`  - ${m}`));
-}
+import {
+  startup,
+  shutdown,
+  unstable_v2_createSession,
+  unstable_v2_prompt,
+} from "@anthropic-ai/claude-agent-sdk";
 
 async function main() {
-  await compareModels("为什么天空是蓝色的？");
-  await dynamicModelSwitch();
+  await startup({});
+
+  try {
+    console.log("=== Demo 4: 模型切换 ===\n");
+
+    const MODELS = [
+      { id: "claude-sonnet-4-20250514", name: "Sonnet 4", speed: "快速" },
+      { id: "claude-opus-4-20250514", name: "Opus 4", speed: "最强" },
+      { id: "claude-haiku-4-20250514", name: "Haiku 4", speed: "最快" },
+    ];
+
+    // --- 比较不同模型 ---
+    console.log("--- 比较不同模型回答同一问题 ---\n");
+
+    const question = "为什么天空是蓝色的？";
+
+    for (const model of MODELS) {
+      console.log(`\n--- ${model.name} (${model.speed}) ---`);
+      const session = await unstable_v2_createSession({
+        systemPrompt: "简洁回答，只说重点，不超过3句话。",
+        model: model.id,
+      });
+
+      const result = await unstable_v2_prompt(question, {});
+      console.log(`回复: ${result.message.text?.slice(0, 80)}...`);
+      console.log(`Tokens: 输入 ${result.message.usage?.input_tokens} | 输出 ${result.message.usage?.output_tokens}`);
+    }
+
+    // --- 动态切换模型 ---
+    console.log("\n--- 动态切换模型 ---");
+
+    // 创建 Haiku 会话（快速）
+    let session = await unstable_v2_createSession({
+      systemPrompt: "你是助手。",
+      model: "claude-haiku-4-20250514",
+    });
+
+    let r = await unstable_v2_prompt("1+1=?", {});
+    console.log("Haiku 回复:", r.message.text);
+
+    // 切换到 Opus（更强）
+    console.log("\n切换到 Opus...");
+    session = await unstable_v2_createSession({
+      systemPrompt: "你是助手。",
+      model: "claude-opus-4-20250514",
+    });
+
+    r = await unstable_v2_prompt("解释量子计算的基本原理", {});
+    console.log("Opus 回复:", r.message.text?.slice(0, 100) + "...");
+
+  } finally {
+    await shutdown();
+  }
 }
 
 main().catch(console.error);

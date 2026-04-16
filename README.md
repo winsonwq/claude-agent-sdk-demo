@@ -18,60 +18,70 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 | 文件 | 演示内容 |
 |------|----------|
-| `1-basic-chat.ts` | 基础对话：创建 Agent、发送消息、获取回复 |
-| `2-multi-turn.ts` | 多轮对话 + 工具调用追踪 |
-| `3-hooks.ts` | Hook 系统：onStart/onToolUse/onMessage/onComplete 等 |
-| `4-model-selection.ts` | 模型切换：不同模型比较、动态切换 |
-| `5-advanced.ts` | 高级控制：流式输出、暂停/恢复、状态管理 |
+| `1-startup-and-query.ts` | 初始化 SDK + 基础 query |
+| `2-session-management.ts` | 会话管理：创建/多轮/历史/重命名/标记 |
+| `3-hooks.ts` | Hook 系统：工具 Hook + 会话 Hook |
+| `4-model-selection.ts` | 模型切换：不同模型比较 |
 
 ## 运行
 
 ```bash
-# 基础对话
-npx ts-node src/1-basic-chat.ts
+# 初始化 + 基础查询
+npx ts-node src/1-startup-and-query.ts
 
-# 多轮对话 + 工具调用
-npx ts-node src/2-multi-turn.ts
+# 会话管理
+npx ts-node src/2-session-management.ts
 
-# Hook 控制
+# Hook 系统
 npx ts-node src/3-hooks.ts
 
 # 模型切换
 npx ts-node src/4-model-selection.ts
-
-# 高级功能
-npx ts-node src/5-advanced.ts
 ```
 
 ## 核心 API 概览
 
 ```typescript
-import { Agent } from "@anthropic-ai/claude-agent-sdk";
+import {
+  startup,      // 初始化 SDK
+  shutdown,     // 关闭 SDK
+  query,        // 发送消息（简单方式）
+  tool,         // 注册工具
+  unstable_v2_createSession,  // 创建会话
+  unstable_v2_prompt,         // 发送消息到会话
+  unstable_v2_resumeSession,  // 恢复会话
+  listSessions, // 列出所有会话
+  getSessionMessages, // 获取会话历史
+  renameSession, // 重命名会话
+  tagSession,    // 标记会话
+} from "@anthropic-ai/claude-agent-sdk";
 
-// 创建 Agent
-const agent = new Agent({
-  model: "claude-3-5-sonnet-20241022",
-  systemPrompt: "你的角色设定",
-  tools: [...],       // 可用工具列表
-  hooks: {...},       // 生命周期钩子
+// 初始化
+await startup({});
+
+// 方式一：直接 query
+const result = await query({ message: "你好" });
+
+// 方式二：创建会话后多轮对话
+const session = await unstable_v2_createSession({
+  systemPrompt: "你是...",
+  model: "claude-sonnet-4-20250514",
+  hooks: {...},
+});
+const r1 = await unstable_v2_prompt("第一轮消息", {});
+const r2 = await unstable_v2_prompt("第二轮（上下文保持）", {});
+
+// 注册工具
+const myTool = tool("tool_name", "描述", { arg: { type: "string" } }, async (args) => {
+  return { result: "..." };
+}, {
+  onCall: (args) => { /* 调用前 */ },
+  onResult: (result) => { /* 调用后 */ },
 });
 
-// 运行对话
-const response = await agent.run({ message: "你好" });
-
-// 工具调用追踪
-agent.getToolCalls();
-
-// 对话历史
-agent.getConversationHistory();
-
-// 状态管理
-agent.getStatus();     // 'idle' | 'running' | 'paused' | 'completed'
-agent.pause();
-agent.resume();
-agent.interrupt();
-
-// 模型切换
-agent.setModel("claude-3-5-haiku-20241022");
-agent.getModel();
+// 会话管理
+const sessions = await listSessions({});
+const messages = await getSessionMessages(sessionId, {});
+await renameSession(sessionId, "新标题");
+await tagSession(sessionId, "tag");
 ```

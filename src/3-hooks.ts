@@ -1,99 +1,99 @@
 /**
- * Demo 3: Hook 控制
+ * Demo 3: Hook 系统
  * 
- * 演示 Agent 的生命周期 Hook：
- * - onStart: Agent 启动时
- * - onToolUse: 工具使用时
- * - onToolResult: 工具结果返回时
- * - onMessage: 每条消息时
- * - onError: 错误时
- * - onComplete: 完成时
- * 
- * 还可以通过 Hook 实现：
- * - 拦截/修改工具输入输出
- * - 实时日志记录
- * - 进度跟踪
- * - 中断 Agent 运行
+ * SDK 提供两种 Hook 机制：
+ * 1. 注册工具时的 callback（onCall, onResult）
+ * 2. createSession 的 hooks 参数（会话生命周期）
  */
 
-import { Agent, ToolResult, Hooks } from "@anthropic-ai/claude-agent-sdk";
+import {
+  startup,
+  shutdown,
+  tool,
+  unstable_v2_createSession,
+  unstable_v2_prompt,
+} from "@anthropic-ai/claude-agent-sdk";
 
 async function main() {
-  console.log("=== Demo 3: Hook 控制 ===\n");
+  await startup({});
 
-  // 定义 Hooks
-  const hooks: Hooks = {
-    // Agent 启动时
-    onStart: () => {
-      console.log("🚀 Agent 启动");
-    },
+  try {
+    console.log("=== Demo 3: Hook 系统 ===\n");
 
-    // 每次工具调用前（可以拦截/修改输入，或拒绝调用）
-    onToolUse: (tool: string, input: Record<string, unknown>) => {
-      console.log(`🔧 工具调用: ${tool}`);
-      // 返回 false 可以拒绝执行该工具
-      // return false;
-      // 返回修改后的 input 可以改变输入
-      // return { ...input, modified: true };
-    },
+    // --- 注册工具 + Hook ---
+    console.log("--- 注册带 Hook 的工具 ---");
 
-    // 工具结果返回后（可以拦截/修改输出）
-    onToolResult: (tool: string, result: ToolResult) => {
-      console.log(`✅ 工具 [${tool}] 执行完成`);
-      // 可以选择是否将结果返回给 Agent
-      // if (result.error) return { output: "错误被Hook拦截" };
-    },
-
-    // 每次收到消息
-    onMessage: (message: any) => {
-      if (message.type === "assistant" && message.text) {
-        const preview = message.text.slice(0, 100).replace(/\n/g, " ");
-        console.log(`💬 Assistant: ${preview}...`);
-      }
-    },
-
-    // 发生错误
-    onError: (error: Error) => {
-      console.error("❌ 错误:", error.message);
-    },
-
-    // Agent 完成
-    onComplete: (result: any) => {
-      console.log("🏁 Agent 完成");
-      console.log(`   总输入 tokens: ${result.usage?.input_tokens}`);
-      console.log(`   总输出 tokens: ${result.usage?.output_tokens}`);
-    },
-  };
-
-  const agent = new Agent({
-    model: "claude-3-5-sonnet-20241022",
-    systemPrompt: "你是一个乐于助人的助手。",
-    tools: [
+    // 注册一个 "calculate" 工具
+    const calcTool = tool(
+      "calculate",
+      "执行数学计算",
       {
-        name: "bash",
-        description: "执行命令",
-        inputSchema: {
-          type: "object",
-          properties: {
-            command: { type: "string" },
-          },
-          required: ["command"],
+        expression: {
+          type: "string",
+          description: "要计算的数学表达式，如 '2 + 3 * 4'",
         },
       },
-    ],
-    hooks,
-  });
+      async (args) => {
+        // onResult hook: 工具执行完后
+        console.log(`[Hook] calculate 被调用，输入: ${args.expression}`);
 
-  // 运行过程中可以随时获取状态
-  console.log("Agent 状态:", agent.getStatus());
+        try {
+          // 安全地计算表达式（仅支持基本运算）
+          const result = Function(`"use strict"; return (${args.expression})`)();
+          return { result };
+        } catch {
+          return { error: "计算表达式无效" };
+        }
+      },
+      {
+        // onCall hook: 工具被调用前
+        onCall: (args) => {
+          console.log(`[Hook] calculate 将被调用，参数:`, args);
+        },
+        // onResult hook: 工具执行后
+        onResult: (result) => {
+          console.log(`[Hook] calculate 结果:`, result);
+        },
+      }
+    );
 
-  const response = await agent.run({
-    message: "请执行 echo 'Hello from Hooks' 命令",
-  });
+    // --- 创建带会话 Hook 的会话 ---
+    console.log("\n--- 创建带会话 Hook 的会话 ---");
 
-  console.log("\n--- 最终结果 ---");
-  console.log("回复:", response.text);
-  console.log("最终状态:", agent.getStatus());
+    const session = await unstable_v2_createSession({
+      systemPrompt: "你是一个数学助手，可以执行计算。",
+      hooks: {
+        // 会话开始
+        onStart: () => {
+          console.log("[Hook] 会话开始");
+        },
+        // 消息发送前（可以修改消息或拒绝）
+        onMessage: (msg: any) => {
+          console.log(`[Hook] 收到消息: ${msg.type}`);
+          // 返回 undefined 表示不拦截
+        },
+        // 发生错误
+        onError: (error: Error) => {
+          console.error("[Hook] 会话错误:", error.message);
+        },
+        // 会话完成
+        onComplete: () => {
+          console.log("[Hook] 会话完成");
+        },
+      },
+    });
+
+    // --- 测试对话 + 工具调用 ---
+    console.log("\n--- 测试对话 ---");
+    const r1 = await unstable_v2_prompt("计算 (15 + 25) * 2 等于多少？", {});
+    console.log("回复:", r1.message.text);
+
+    const r2 = await unstable_v2_prompt("再除以 5 呢？", {});
+    console.log("回复:", r2.message.text);
+
+  } finally {
+    await shutdown();
+  }
 }
 
 main().catch(console.error);
